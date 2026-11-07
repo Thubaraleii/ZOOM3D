@@ -123,6 +123,12 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
     # --- empilhamento (paredes do bloco) ---
     tilt = v.Z_REF_TILT + v.TREND_A * (gx - v.TREND_X0) + v.TREND_B * (gy - v.TREND_Y0)
     contatos = [gz if m == 0 else np.minimum(tilt - v.PROFUNDIDADE_CAMADAS[m], gz) for m in range(len(v.PROFUNDIDADE_CAMADAS))]
+    # "erase": dentro da soleira as camadas acima da base do corpo somem (a soleira ocupa terreno -> base);
+    # dentro do dique as camadas somem por completo (o dique atravessa todo o pacote).
+    m_sill = (form == PRIORIDADE.index("Soleira") + 1).reshape(gz.shape)
+    m_dique = (form == PRIORIDADE.index("Dique") + 1).reshape(gz.shape)
+    base_sill_g = np.minimum(contatos[1], gz - v.ESPESSURA_MINIMA_SILL)
+    contatos = [np.where(m_dique, gz, np.where(m_sill, np.minimum(c, base_sill_g), c)) for c in contatos]
     for k, nome in enumerate(v.NOMES_CAMADAS):
         ri = np.unique(np.append(np.arange(0, ny, 3), ny - 1)); ci = np.unique(np.append(np.arange(0, nx, 3), nx - 1))
         sub = np.ix_(ri, ci)  # paredes com malha mais grossa (tiras largas, sem serrilhado)
