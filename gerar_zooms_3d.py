@@ -43,7 +43,7 @@ ZOOMS = {
     "D": dict(nome="Domínio sul", bbox=(582500, 6999700, 590100, 7009300)),
 }
 N_GRADE = 200          # vertices por eixo maior do relevo
-OFFSET_DEC = {"Soleira": 10.0, "Dique": 12.0, "Depósito quaternário": 8.0}  # decalques em camadas (corpos por cima)
+OFFSET_DEC = {"Depósito quaternário": 2.5, "Soleira": 3.5, "Dique": 4.5}  # decalques em camadas (corpos por cima)
 RES_RASTER_M = 12.0    # resolucao do raster geologico (m)
 BASE_DIQUE_Z = -350.0  # raiz do dique (m)
 ELEV_LINEAMENTO = 14.0
@@ -133,7 +133,7 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
                 pxy, tri = v.triangular_interior(parte, 20.0, None, nos_zoom)
                 if len(tri) == 0:
                     continue
-                zz = np.array([elevacao(x, y) for x, y in pxy]) + OFFSET_DEC.get(nome_f, 6.0)
+                zz = np.array([elevacao(x, y) for x, y in pxy]) + OFFSET_DEC.get(nome_f, 1.5)
                 vs.append(np.column_stack([pxy, zz])); fs.append(tri + off_v); off_v += len(pxy)
         if vs:
             vv, ff = np.vstack(vs), np.vstack(fs)
