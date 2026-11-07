@@ -1,6 +1,6 @@
 """Gera os 4 modelos 3D de zoom (HTML autonomo, Plotly) -- recortes de detalhe
 do sistema intrusivo de Taio: (A) Bela Vista, (B) Pechincha, (C) Dominio norte e
-(D) Dique alimentador (NW). Cada recorte e um bloco 3D proprio (relevo real do
+(D) Dominio sul. Cada recorte e um bloco 3D proprio (relevo real do
 drone + empilhamento sedimentar + soleira/dique + lineamentos + pontos de campo
 + pocos), com troca de textura (geologia / satelite / hipsometria) e exagero
 vertical ajustavel. Os recortes (ZOOMS) sao retangulos UTM 22S (EPSG:31982),
@@ -35,10 +35,10 @@ OUT_HTML = AQUI / "zooms_3d_taio.html"
 
 # retangulos (xmin, ymin, xmax, ymax) em UTM 22S -- AJUSTAR conforme os recortes desejados
 ZOOMS = {
-    "A": dict(nome="Bela Vista", bbox=(584000, 7015200, 588300, 7018400)),
-    "B": dict(nome="Pechincha", bbox=(585500, 7009000, 590800, 7014000)),
-    "C": dict(nome="Domínio norte", bbox=(600200, 7025300, 604500, 7029000)),
-    "D": dict(nome="Dique alimentador (NW)", bbox=(589600, 7006200, 595800, 7015200)),
+    "A": dict(nome="Bela Vista", bbox=(589600, 7006200, 595800, 7015200)),
+    "B": dict(nome="Pechincha", bbox=(586000, 7008900, 594200, 7014900)),
+    "C": dict(nome="Domínio norte", bbox=(584000, 7015200, 588300, 7018400)),
+    "D": dict(nome="Domínio sul", bbox=(582500, 6999700, 590100, 7009300)),
 }
 N_GRADE = 120          # vertices por eixo maior do relevo
 RES_RASTER_M = 12.0    # resolucao do raster geologico (m)
