@@ -212,6 +212,18 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
                 mode="markers", marker=dict(size=5, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
                 text=[f"<b>{r.ponto_id}</b><br>{r.classificacao}" for r in ec.itertuples()], hoverinfo="text",
                 name="Falha de campo", legendgroup="estr", meta="estruturas"))
+            # linha de superficie (rumo) de cada falha de campo: segmento de 500 m ao longo do azimute/strike
+            lx, ly, lz = [], [], []
+            for r in ec.itertuples():
+                if r.azimute_ou_strike_deg != r.azimute_ou_strike_deg:
+                    continue
+                ux, uy = np.sin(np.radians(r.azimute_ou_strike_deg)), np.cos(np.radians(r.azimute_ou_strike_deg))
+                for f in np.linspace(-250, 250, 12):
+                    px, py = r.geometry.x + f * ux, r.geometry.y + f * uy
+                    lx.append(px); ly.append(py); lz.append(elevacao(px, py) + ELEV_LINEAMENTO)
+                lx.append(None); ly.append(None); lz.append(None)
+            fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=6),
+                                       name="Falha de campo (rumo)", legendgroup="estr", meta="estruturas", hoverinfo="name"))
     pd_ = pocos[pocos.geometry.within(janela)]
     if len(pd_):
         fig.add_trace(go.Scatter3d(
