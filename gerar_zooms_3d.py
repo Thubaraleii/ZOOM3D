@@ -86,7 +86,7 @@ def raster_formacao(lito, bbox, gx, gy):
     r = features.rasterize(shapes, out_shape=(h, w), transform=tr, fill=0, dtype="uint8")
     col = np.clip(((gx - x0) / (x1 - x0) * (w - 1)).astype(int), 0, w - 1)
     row = np.clip(((y1 - gy) / (y1 - y0) * (h - 1)).astype(int), 0, h - 1)
-    return r[row, col]
+    return r[row, col], r
 
 
 def mesh_xyz(m, **kw):
@@ -105,7 +105,7 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
     fig = go.Figure()
 
     # --- relevo em 3 texturas (so uma visivel por vez) ---
-    form = raster_formacao(lito, bbox, gx, gy)
+    form, r_fine = raster_formacao(lito, bbox, gx, gy)
     paleta = np.array([[60, 60, 70]] + [hex_rgb(COR_FORMACAO[n]) for n in PRIORIDADE], dtype=np.uint8)
     cor_geo = paleta[form].reshape(-1, 3)
     sr, sg, sb = v.amostrar_satelite_rgb(sat, gx, gy, *sat_bbox)
@@ -123,6 +123,7 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
     # --- empilhamento (paredes do bloco) ---
     tilt = v.Z_REF_TILT + v.TREND_A * (gx - v.TREND_X0) + v.TREND_B * (gy - v.TREND_Y0)
     contatos = [gz if m == 0 else np.minimum(tilt - v.PROFUNDIDADE_CAMADAS[m], gz) for m in range(len(v.PROFUNDIDADE_CAMADAS))]
+    contatos_orig = [c.copy() for c in contatos]  # sem o "erase": usados no chao do bloco e nas faces de corte
     # "erase": dentro da soleira as camadas acima da base do corpo somem (a soleira ocupa terreno -> base);
     # dentro do dique as camadas somem por completo (o dique atravessa todo o pacote).
     m_sill = (form == PRIORIDADE.index("Soleira") + 1).reshape(gz.shape)
@@ -136,7 +137,15 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
         fig.add_trace(go.Mesh3d(x=np.round(px, 1), y=np.round(py, 1), z=np.round(pz, 1), i=pi, j=pj, k=pk,
                                 color=v.CORES_CAMADAS[k], flatshading=False, name=nome, legendgroup=nome, showlegend=True,
                                 hoverinfo="name", lighting=dict(ambient=0.95, diffuse=0.1, specular=0.0, roughness=1.0)))
-    zmin_bloco = float(np.nanmin(contatos[-1]))
+    zmin_bloco = float(np.nanmin(contatos_orig[-1]))
+    # chao do bloco (fecha o solido embaixo) e placeholders das faces de corte (preenchidas em JS)
+    fig.add_trace(go.Mesh3d(x=np.round(gx.ravel(), 1), y=np.round(gy.ravel(), 1), z=np.round(contatos_orig[-1].ravel(), 1),
+                            i=ti, j=tj, k=tk, color=v.CORES_CAMADAS[-1], flatshading=False, showlegend=False, hoverinfo="skip",
+                            lighting=dict(ambient=0.95, diffuse=0.1, specular=0.0)))
+    for k_cap, (n_cap, c_cap) in enumerate(zip(list(v.NOMES_CAMADAS) + ["Soleira", "Dique"], list(v.CORES_CAMADAS) + [v.COR_SILL, v.COR_DIQUE])):
+        fig.add_trace(go.Mesh3d(x=[0, 0, 0], y=[0, 0, 0], z=[0, 0, 0], i=[0], j=[1], k=[2], color=c_cap, flatshading=False,
+                                showlegend=False, hoverinfo="name", name=n_cap, visible=False, meta=f"cap_{k_cap}",
+                                lighting=dict(ambient=0.95, diffuse=0.1, specular=0.0)))
 
     # --- soleira e dique (solidos) ---
     janela = box(*bbox)
@@ -198,8 +207,16 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
             camera=dict(eye=dict(x=-1.25, y=-1.45, z=0.95)),
         ),
     )
+    import base64 as _b64
+    cap = dict(
+        x0=x0, y0=y0, x1=x1, y1=y1, nx=int(nx), ny=int(ny), terr=np.round(gz.ravel(), 1).tolist(),
+        con=[np.round(c.ravel(), 1).tolist() for c in contatos_orig],
+        rw=int(r_fine.shape[1]), rh=int(r_fine.shape[0]), raster=_b64.b64encode(r_fine.astype(np.uint8).tobytes()).decode(),
+        idx_sill=PRIORIDADE.index("Soleira") + 1, idx_dique=PRIORIDADE.index("Dique") + 1,
+        esp_sill=v.ESPESSURA_MINIMA_SILL, base_dique=BASE_DIQUE_Z,
+    )
     info = dict(nome=cfg["nome"], dx=dx, dy=dy, dz=zmax - zmin, area_km2=dx * dy / 1e6,
-                n_pontos=int(len(dentro)), n_pocos=int(len(pd_)))
+                n_pontos=int(len(dentro)), n_pocos=int(len(pd_)), cap=cap)
     return fig.to_json(), info
 
 
@@ -247,6 +264,8 @@ def main():
  <div class="grupo"><label>Textura</label><button class="tex ativo" data-t="tex_geologia">Geologia</button><button class="tex" data-t="tex_satelite">Satélite</button><button class="tex" data-t="tex_hipsometria">Hipsometria</button></div>
  <div class="grupo"><label>Exagero vertical</label><select id="exag"><option value="1">1×</option><option value="2">2×</option><option value="3" selected>3×</option><option value="5">5×</option><option value="8">8×</option></select></div>
  <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="lineamentos">Lineamentos</button><button class="cam ativo" data-m="campo">Campo</button><button class="cam ativo" data-m="pocos">Poços</button></div>
+ <div class="grupo"><label>Corte</label><select id="ceixo"><option value="">Sem corte</option><option value="x">Leste–Oeste (X)</option><option value="y">Norte–Sul (Y)</option></select>
+  <input type="range" id="cpos" min="5" max="95" value="50" style="width:130px"><button id="cinv">Inverter lado</button></div>
  <div id="info"></div></div>
 {"".join(f'<div class="plot{" ativo" if i == 0 else ""}" id="plot-{c}"></div>' for i, c in enumerate(ZOOMS))}
 <script>{get_plotlyjs()}</script>
@@ -255,17 +274,83 @@ var FIGS = {{{",".join(f'"{c}": {figs[c]}' for c in ZOOMS)}}};
 var INFOS = {json.dumps(infos, ensure_ascii=False)};
 var criados = {{}}, atual = 'A', textura = 'tex_geologia', EXAG = 3, camadasOn = {{lineamentos: true, campo: true, pocos: true}};
 function altura() {{ return window.innerHeight - document.getElementById('barra').offsetHeight; }}
+var CORTE = {{eixo: '', frac: 0.5, inv: false}}, CAPD = {{}};
+function b64u8(s) {{ var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }}
+function prep(c) {{ if (!CAPD[c]) {{ var d = INFOS[c].cap; d.rast = b64u8(d.raster); CAPD[c] = d; }} return CAPD[c]; }}
+function bil(d, arr, x, y) {{
+  var fx = (x - d.x0) / (d.x1 - d.x0) * (d.nx - 1), fy = (y - d.y0) / (d.y1 - d.y0) * (d.ny - 1);
+  fx = Math.min(Math.max(fx, 0), d.nx - 1.001); fy = Math.min(Math.max(fy, 0), d.ny - 1.001);
+  var i = Math.floor(fx), j = Math.floor(fy), tx = fx - i, ty = fy - j;
+  function g(a, b) {{ return arr[b * d.nx + a]; }}
+  return (g(i, j) * (1 - tx) + g(i + 1, j) * tx) * (1 - ty) + (g(i, j + 1) * (1 - tx) + g(i + 1, j + 1) * tx) * ty;
+}}
+function formAt(d, x, y) {{
+  var col = Math.min(Math.max(Math.round((x - d.x0) / (d.x1 - d.x0) * (d.rw - 1)), 0), d.rw - 1);
+  var row = Math.min(Math.max(Math.round((d.y1 - y) / (d.y1 - d.y0) * (d.rh - 1)), 0), d.rh - 1);
+  return d.rast[row * d.rw + col];
+}}
+// face do corte: empilhamento (com a soleira/dique "apagando" o sedimentar) ao longo do plano de corte
+function montarCaps(c, eixo, pos) {{
+  var d = prep(c), ns = 420, tops = [], bots = [], X = [], Y = [], u, k, i;
+  for (u = 0; u < 7; u++) {{ tops.push([]); bots.push([]); }}
+  for (i = 0; i < ns; i++) {{
+    var t = i / (ns - 1), x = eixo === 'x' ? pos : d.x0 + t * (d.x1 - d.x0), y = eixo === 'x' ? d.y0 + t * (d.y1 - d.y0) : pos;
+    X.push(x); Y.push(y);
+    var z0 = bil(d, d.terr, x, y), cs = d.con.map(function(a) {{ return bil(d, a, x, y); }}), f = formAt(d, x, y);
+    var base = Math.min(cs[1], z0 - d.esp_sill);
+    for (k = 0; k < 5; k++) {{
+      var tp = cs[k], bt = cs[k + 1];
+      if (f === d.idx_dique) {{ tp = NaN; bt = NaN; }}
+      else if (f === d.idx_sill) {{ tp = Math.min(tp, base); bt = Math.min(bt, base); }}
+      tops[k].push(tp); bots[k].push(bt);
+    }}
+    tops[5].push(f === d.idx_sill ? z0 : NaN); bots[5].push(f === d.idx_sill ? base : NaN);
+    tops[6].push(f === d.idx_dique ? z0 : NaN); bots[6].push(f === d.idx_dique ? d.base_dique : NaN);
+  }}
+  var out = [];
+  for (u = 0; u < 7; u++) {{
+    var ok = [], ii = [], jj = [], kk = [], z = [];
+    for (i = 0; i < ns; i++) ok.push(isFinite(tops[u][i]) && isFinite(bots[u][i]) && tops[u][i] - bots[u][i] > 0.3);
+    for (i = 0; i < ns; i++) z.push(ok[i] ? tops[u][i] : 0);
+    for (i = 0; i < ns; i++) z.push(ok[i] ? bots[u][i] : 0);
+    for (i = 0; i < ns - 1; i++) if (ok[i] && ok[i + 1]) {{ ii.push(i, i + 1); jj.push(i + 1, ns + i + 1); kk.push(ns + i, ns + i); }}
+    if (!ii.length) {{ ii = [0]; jj = [0]; kk = [0]; }}
+    out.push({{x: X.concat(X), y: Y.concat(Y), z: z, i: ii, j: jj, k: kk}});
+  }}
+  return out;
+}}
+function aplicarCorte(c) {{
+  var gd = document.getElementById('plot-' + c), fig = FIGS[c], s = fig.layout.scene, d = prep(c);
+  var caps = [];
+  fig.data.forEach(function(t, n) {{ if (t.meta && t.meta.indexOf('cap_') === 0) caps[parseInt(t.meta.slice(4), 10)] = n; }});
+  var patch = {{'scene.xaxis.range': s.xaxis.range, 'scene.yaxis.range': s.yaxis.range}};
+  if (!CORTE.eixo) {{
+    Plotly.restyle(gd, {{visible: false}}, caps);
+    Plotly.relayout(gd, patch);
+    return;
+  }}
+  var eixo = CORTE.eixo, a0 = eixo === 'x' ? d.x0 : d.y0, a1 = eixo === 'x' ? d.x1 : d.y1, pos = a0 + CORTE.frac * (a1 - a0);
+  var base = (eixo === 'x' ? s.xaxis.range : s.yaxis.range);
+  patch['scene.' + eixo + 'axis.range'] = CORTE.inv ? [pos - 0.5, base[1]] : [base[0], pos + 0.5];
+  Plotly.relayout(gd, patch);
+  var dados = montarCaps(c, eixo, pos);
+  dados.forEach(function(m, u) {{
+    Plotly.restyle(gd, {{x: [m.x], y: [m.y], z: [m.z], i: [m.i], j: [m.j], k: [m.k], visible: true}}, [caps[u]]);
+  }});
+}}
 function aplicar(c) {{
   var gd = document.getElementById('plot-' + c), fig = FIGS[c];
   var vis = fig.data.map(function(t) {{
     var m = t.meta;
     if (m && m.indexOf('tex_') === 0) return m === textura;
+    if (m && m.indexOf('cap_') === 0) return false;
     if (m && camadasOn.hasOwnProperty(m)) return camadasOn[m];
     return true;
   }});
   Plotly.restyle(gd, {{visible: vis}});
   var s = fig.layout.scene, ar = s.aspectratio;
   Plotly.relayout(gd, {{'scene.aspectratio': {{x: ar.x, y: ar.y, z: ar.z * EXAG / 3}}}});
+  aplicarCorte(c);
 }}
 function mostrar(c) {{
   atual = c;
@@ -284,6 +369,9 @@ document.querySelectorAll('.tex').forEach(function(b) {{ b.onclick = function() 
   textura = b.dataset.t; document.querySelectorAll('.tex').forEach(function(x) {{ x.classList.toggle('ativo', x === b); }}); aplicar(atual); }}; }});
 document.querySelectorAll('.cam').forEach(function(b) {{ b.onclick = function() {{
   camadasOn[b.dataset.m] = !camadasOn[b.dataset.m]; b.classList.toggle('ativo', camadasOn[b.dataset.m]); aplicar(atual); }}; }});
+document.getElementById('ceixo').onchange = function() {{ CORTE.eixo = this.value; CORTE.frac = parseFloat(document.getElementById('cpos').value) / 100; aplicar(atual); }};
+document.getElementById('cpos').oninput = function() {{ CORTE.frac = parseFloat(this.value) / 100; if (CORTE.eixo) aplicarCorte(atual); }};
+document.getElementById('cinv').onclick = function() {{ CORTE.inv = !CORTE.inv; this.classList.toggle('ativo', CORTE.inv); if (CORTE.eixo) aplicarCorte(atual); }};
 document.getElementById('exag').onchange = function() {{ EXAG = parseFloat(this.value); aplicar(atual); }};
 window.addEventListener('resize', function() {{ var gd = document.getElementById('plot-' + atual); gd.style.height = altura() + 'px'; Plotly.Plots.resize(gd); }});
 mostrar('A');
