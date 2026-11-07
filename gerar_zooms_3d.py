@@ -30,6 +30,8 @@ BANCO = MESTRADO / "2_Banco_de_Dados"
 PONTOS_GPKG = v.PONTOS_CAMPO_GPKG
 LINEAMENTOS_GPKG = BANCO / "Unificação" / "lineamentos_direcoes.gpkg"
 POCOS_GPKG = BANCO / "Unificação" / "pocos_regionais.gpkg"
+GEOLOGIA_REGIONAL_GPKG = BANCO / "dados_base" / "geologia_regional_sc.gpkg"
+ESTRUTURAL_GPKG = BANCO / "Unificação" / "GPKG_Novos" / "nuvem_pontos_direcoes.gpkg"
 LOGO_PATH = AQUI / "assets" / "logo_taio.png"
 OUT_HTML = AQUI / "zooms_3d_taio.html"
 
@@ -95,7 +97,7 @@ def mesh_xyz(m, **kw):
                 i=faces[:, 0], j=faces[:, 1], k=faces[:, 2], **kw)
 
 
-def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, pocos):
+def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, pocos, est_cprm, est_campo):
     bbox = cfg["bbox"]
     x0, y0, x1, y1 = bbox
     gx, gy, gz = grade_relevo(xyz, bbox, N_GRADE)
@@ -187,6 +189,29 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
             marker=dict(size=4, color=[v.CORES_LITOLOGIA_CAMPO.get(l, v.COR_LITOLOGIA_PADRAO) for l in dentro["litologia_padronizada"]],
                         line=dict(width=1, color="#071729")),
             text=dentro["ponto_id"].astype(str), hoverinfo="text", name="Pontos de campo", meta="campo"))
+    # falhas e fraturas: CPRM (falha azul, fratura rosa, linhas drapeadas) + falhas de campo (x pretos)
+    for categoria, cor, larg in (("Falha", "#2563EB", 7), ("Fratura", "#D81B73", 5)):
+        ex, ey, ez = [], [], []
+        for g in est_cprm.loc[est_cprm["categoria"] == categoria, "geometry"]:
+            inter = g.intersection(janela)
+            for seg in ([inter] if inter.geom_type == "LineString" else list(getattr(inter, "geoms", []))):
+                if seg.geom_type != "LineString" or seg.length < 20:
+                    continue
+                for d_seg in np.linspace(0, seg.length, max(int(seg.length // 40), 2)):
+                    q = seg.interpolate(d_seg)
+                    ex.append(q.x); ey.append(q.y); ez.append(elevacao(q.x, q.y) + ELEV_LINEAMENTO)
+                ex.append(None); ey.append(None); ez.append(None)
+        if ex:
+            fig.add_trace(go.Scatter3d(x=ex, y=ey, z=ez, mode="lines", line=dict(color=cor, width=larg), name=f"{categoria} (CPRM)",
+                                       legendgroup="estr", meta="estruturas", hoverinfo="name"))
+    if est_campo is not None:
+        ec = est_campo[est_campo.geometry.within(janela)]
+        if len(ec):
+            fig.add_trace(go.Scatter3d(
+                x=ec.geometry.x, y=ec.geometry.y, z=[elevacao(x, y) + ELEV_PONTO for x, y in zip(ec.geometry.x, ec.geometry.y)],
+                mode="markers", marker=dict(size=5, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
+                text=[f"<b>{r.ponto_id}</b><br>{r.classificacao}" for r in ec.itertuples()], hoverinfo="text",
+                name="Falha de campo", legendgroup="estr", meta="estruturas"))
     pd_ = pocos[pocos.geometry.within(janela)]
     if len(pd_):
         fig.add_trace(go.Scatter3d(
@@ -230,10 +255,15 @@ def main():
     lineas = gpd.read_file(LINEAMENTOS_GPKG).to_crs(31982)
     pontos = gpd.read_file(PONTOS_GPKG).to_crs(31982)
     pocos = gpd.read_file(POCOS_GPKG).to_crs(31982)
+    est_cprm = gpd.read_file(GEOLOGIA_REGIONAL_GPKG, layer="estrutura") if GEOLOGIA_REGIONAL_GPKG.exists() else None
+    est_campo = None
+    if ESTRUTURAL_GPKG.exists():
+        est_campo = gpd.read_file(ESTRUTURAL_GPKG).to_crs(31982)
+        est_campo = est_campo[est_campo["classificacao"].isin(["falha_ou_dique_ambiguo_relevo_negativo", "fratura_falha"])]
     figs, infos = {}, {}
     for chave, cfg in ZOOMS.items():
         print(f"  zoom {chave}: {cfg['nome']}")
-        figs[chave], infos[chave] = montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, pocos)
+        figs[chave], infos[chave] = montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, pocos, est_cprm, est_campo)
         print(f"    {infos[chave]['area_km2']:.1f} km², {infos[chave]['n_pontos']} pontos de campo, {infos[chave]['n_pocos']} poços")
 
     import base64
@@ -263,7 +293,7 @@ def main():
  <div class="grupo"><label>Recorte</label>{abas}</div>
  <div class="grupo"><label>Textura</label><button class="tex ativo" data-t="tex_geologia">Geologia</button><button class="tex" data-t="tex_satelite">Satélite</button><button class="tex" data-t="tex_hipsometria">Hipsometria</button></div>
  <div class="grupo"><label>Exagero vertical</label><select id="exag"><option value="1">1×</option><option value="2">2×</option><option value="3" selected>3×</option><option value="5">5×</option><option value="8">8×</option></select></div>
- <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="lineamentos">Lineamentos</button><button class="cam ativo" data-m="campo">Campo</button><button class="cam ativo" data-m="pocos">Poços</button></div>
+ <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="lineamentos">Lineamentos</button><button class="cam ativo" data-m="campo">Campo</button><button class="cam ativo" data-m="estruturas">Falhas/Fraturas</button><button class="cam ativo" data-m="pocos">Poços</button></div>
  <div class="grupo"><label>Corte</label><select id="ceixo"><option value="">Sem corte</option><option value="x">Leste–Oeste (X)</option><option value="y">Norte–Sul (Y)</option></select>
   <input type="range" id="cpos" min="5" max="95" value="50" style="width:130px"><button id="cinv">Inverter lado</button></div>
  <div id="info"></div></div>
@@ -272,7 +302,7 @@ def main():
 <script>
 var FIGS = {{{",".join(f'"{c}": {figs[c]}' for c in ZOOMS)}}};
 var INFOS = {json.dumps(infos, ensure_ascii=False)};
-var criados = {{}}, atual = 'A', textura = 'tex_geologia', EXAG = 3, camadasOn = {{lineamentos: true, campo: true, pocos: true}};
+var criados = {{}}, atual = 'A', textura = 'tex_geologia', EXAG = 3, camadasOn = {{lineamentos: true, campo: true, estruturas: true, pocos: true}};
 function altura() {{ return window.innerHeight - document.getElementById('barra').offsetHeight; }}
 var CORTE = {{eixo: '', frac: 0.5, inv: false}}, CAPD = {{}};
 function b64u8(s) {{ var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }}
