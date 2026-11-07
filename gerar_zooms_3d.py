@@ -42,7 +42,8 @@ ZOOMS = {
     "C": dict(nome="Domínio norte", bbox=(584000, 7015200, 588300, 7018400)),
     "D": dict(nome="Domínio sul", bbox=(582500, 6999700, 590100, 7009300)),
 }
-N_GRADE = 120          # vertices por eixo maior do relevo
+N_GRADE = 200          # vertices por eixo maior do relevo
+OFFSET_DEC = {"Soleira": 10.0, "Dique": 12.0, "Depósito quaternário": 8.0}  # decalques em camadas (corpos por cima)
 RES_RASTER_M = 12.0    # resolucao do raster geologico (m)
 BASE_DIQUE_Z = -350.0  # raiz do dique (m)
 ELEV_LINEAMENTO = 14.0
@@ -108,8 +109,6 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
 
     # --- relevo em 3 texturas (so uma visivel por vez) ---
     form, r_fine = raster_formacao(lito, bbox, gx, gy)
-    paleta = np.array([[60, 60, 70]] + [hex_rgb(COR_FORMACAO[n]) for n in PRIORIDADE], dtype=np.uint8)
-    cor_geo = paleta[form].reshape(-1, 3)
     sr, sg, sb = v.amostrar_satelite_rgb(sat, gx, gy, *sat_bbox)
     cor_sat = np.column_stack([sr.ravel(), sg.ravel(), sb.ravel()])
     zn = (gz.ravel() - gz.min()) / max(np.ptp(gz), 1.0)
@@ -118,9 +117,29 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
     lo = np.floor(pos).astype(int).clip(0, len(paleta_h) - 2)
     fr = (pos - lo)[:, None]
     cor_hip = (paleta_h[lo] * (1 - fr) + paleta_h[lo + 1] * fr).astype(np.uint8)
-    for nome, cores, vis in (("tex_geologia", cor_geo, True), ("tex_satelite", cor_sat, False), ("tex_hipsometria", cor_hip, False)):
-        fig.add_trace(go.Mesh3d(**base_xy, vertexcolor=cores, name=nome, visible=vis, showlegend=False, hoverinfo="skip",
-                                lighting=dict(ambient=0.7, diffuse=0.6, specular=0.05), flatshading=False, meta=nome))
+    fig.add_trace(go.Mesh3d(**base_xy, vertexcolor=cor_hip, name="terreno", visible=True, showlegend=False, hoverinfo="skip",
+                            lighting=dict(ambient=0.7, diffuse=0.6, specular=0.05), flatshading=False, meta="terreno"))
+    # decalques geologicos: poligonos exatos (contatos finos e suaves) recortados no bbox e triangulados com os nos da malha,
+    # drapeados no relevo; os corpos intrusivos ficam um pouco acima do sedimentar (sem z-fighting)
+    nos_zoom = np.column_stack([gx.ravel(), gy.ravel()])
+    janela_dec = box(*bbox)
+    for nome_f in PRIORIDADE:
+        vs, fs, off_v = [], [], 0
+        for g in lito.loc[lito["formacao"] == nome_f, "geometry"]:
+            inter = g.intersection(janela_dec)
+            for parte in ([inter] if inter.geom_type == "Polygon" else list(getattr(inter, "geoms", []))):
+                if parte.geom_type != "Polygon" or parte.area < 150:
+                    continue
+                pxy, tri = v.triangular_interior(parte, 20.0, None, nos_zoom)
+                if len(tri) == 0:
+                    continue
+                zz = np.array([elevacao(x, y) for x, y in pxy]) + OFFSET_DEC.get(nome_f, 6.0)
+                vs.append(np.column_stack([pxy, zz])); fs.append(tri + off_v); off_v += len(pxy)
+        if vs:
+            vv, ff = np.vstack(vs), np.vstack(fs)
+            fig.add_trace(go.Mesh3d(x=np.round(vv[:, 0], 1), y=np.round(vv[:, 1], 1), z=np.round(vv[:, 2], 1), i=ff[:, 0], j=ff[:, 1], k=ff[:, 2],
+                                    color=COR_FORMACAO[nome_f], flatshading=False, showlegend=False, hoverinfo="skip", name=nome_f, meta="geo",
+                                    lighting=dict(ambient=0.9, diffuse=0.3, specular=0.0)))
 
     # --- empilhamento (paredes do bloco) ---
     tilt = v.Z_REF_TILT + v.TREND_A * (gx - v.TREND_X0) + v.TREND_B * (gy - v.TREND_Y0)
@@ -181,7 +200,7 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
                 zs += [elevacao(*p) + ELEV_LINEAMENTO for p in pts] + [None]
         if xs:
             fig.add_trace(go.Scatter3d(x=xs, y=ys, z=zs, mode="lines", line=dict(color=cor, width=5), name=f"Lineamento {tipo.lower()}",
-                                       legendgroup="lin", meta="lineamentos", hoverinfo="name"))
+                                       legendgroup="lin", meta="lin_pos" if tipo == "Positivo" else "lin_neg", hoverinfo="name"))
     dentro = pontos[pontos.geometry.within(janela)]
     if len(dentro):
         fig.add_trace(go.Scatter3d(
@@ -203,15 +222,15 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
                 ex.append(None); ey.append(None); ez.append(None)
         if ex:
             fig.add_trace(go.Scatter3d(x=ex, y=ey, z=ez, mode="lines", line=dict(color=cor, width=larg), name=f"{categoria} (CPRM)",
-                                       legendgroup="estr", meta="estruturas", hoverinfo="name"))
+                                       legendgroup="estr", meta=f"est_{categoria.lower()}", hoverinfo="name"))
     if est_campo is not None:
         ec = est_campo[est_campo.geometry.within(janela)]
         if len(ec):
             fig.add_trace(go.Scatter3d(
                 x=ec.geometry.x, y=ec.geometry.y, z=[elevacao(x, y) + ELEV_PONTO for x, y in zip(ec.geometry.x, ec.geometry.y)],
-                mode="markers", marker=dict(size=5, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
+                mode="markers", marker=dict(size=4, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
                 text=[f"<b>{r.ponto_id}</b><br>{r.classificacao}" for r in ec.itertuples()], hoverinfo="text",
-                name="Falha de campo", legendgroup="estr", meta="estruturas"))
+                name="Falha de campo", legendgroup="estr", meta="est_campo"))
             # linha de superficie (rumo) de cada falha de campo: segmento de 500 m ao longo do azimute/strike
             lx, ly, lz = [], [], []
             for r in ec.itertuples():
@@ -222,8 +241,8 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
                     px, py = r.geometry.x + f * ux, r.geometry.y + f * uy
                     lx.append(px); ly.append(py); lz.append(elevacao(px, py) + ELEV_LINEAMENTO)
                 lx.append(None); ly.append(None); lz.append(None)
-            fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=6),
-                                       name="Falha de campo (rumo)", legendgroup="estr", meta="estruturas", hoverinfo="name"))
+            fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=3),
+                                       name="Falha de campo (rumo)", legendgroup="estr", meta="est_campo", hoverinfo="name"))
     pd_ = pocos[pocos.geometry.within(janela)]
     if len(pd_):
         fig.add_trace(go.Scatter3d(
@@ -252,8 +271,9 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
         idx_sill=PRIORIDADE.index("Soleira") + 1, idx_dique=PRIORIDADE.index("Dique") + 1,
         esp_sill=v.ESPESSURA_MINIMA_SILL, base_dique=BASE_DIQUE_Z,
     )
+    cores = dict(hip=_b64.b64encode(cor_hip.astype(np.uint8).tobytes()).decode(), sat=_b64.b64encode(cor_sat.astype(np.uint8).tobytes()).decode())
     info = dict(nome=cfg["nome"], dx=dx, dy=dy, dz=zmax - zmin, area_km2=dx * dy / 1e6,
-                n_pontos=int(len(dentro)), n_pocos=int(len(pd_)), cap=cap)
+                n_pontos=int(len(dentro)), n_pocos=int(len(pd_)), cap=cap, cores=cores)
     return fig.to_json(), info
 
 
@@ -305,7 +325,8 @@ def main():
  <div class="grupo"><label>Recorte</label>{abas}</div>
  <div class="grupo"><label>Textura</label><button class="tex ativo" data-t="tex_geologia">Geologia</button><button class="tex" data-t="tex_satelite">Satélite</button><button class="tex" data-t="tex_hipsometria">Hipsometria</button></div>
  <div class="grupo"><label>Exagero vertical</label><select id="exag"><option value="1">1×</option><option value="2">2×</option><option value="3" selected>3×</option><option value="5">5×</option><option value="8">8×</option></select></div>
- <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="lineamentos">Lineamentos</button><button class="cam ativo" data-m="campo">Campo</button><button class="cam ativo" data-m="estruturas">Falhas/Fraturas</button><button class="cam ativo" data-m="pocos">Poços</button></div>
+ <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="campo">Pontos de campo</button><button class="cam ativo" data-m="pocos">Poços</button></div>
+ <div class="grupo"><label>Estruturas</label><button class="cam ativo" data-m="est_falha">Falha CPRM</button><button class="cam ativo" data-m="est_fratura">Fratura CPRM</button><button class="cam ativo" data-m="est_campo">Falha de campo</button><button class="cam ativo" data-m="lin_pos">Lineam. (+)</button><button class="cam ativo" data-m="lin_neg">Lineam. (−)</button></div>
  <div class="grupo"><label>Corte</label><select id="ceixo"><option value="">Sem corte</option><option value="x">Leste–Oeste (X)</option><option value="y">Norte–Sul (Y)</option></select>
   <input type="range" id="cpos" min="5" max="95" value="50" style="width:130px"><button id="cinv">Inverter lado</button></div>
  <div id="info"></div></div>
@@ -314,7 +335,7 @@ def main():
 <script>
 var FIGS = {{{",".join(f'"{c}": {figs[c]}' for c in ZOOMS)}}};
 var INFOS = {json.dumps(infos, ensure_ascii=False)};
-var criados = {{}}, atual = 'A', textura = 'tex_geologia', EXAG = 3, camadasOn = {{lineamentos: true, campo: true, estruturas: true, pocos: true}};
+var criados = {{}}, atual = 'A', textura = 'tex_geologia', EXAG = 3, camadasOn = {{campo: true, pocos: true, est_falha: true, est_fratura: true, est_campo: true, lin_pos: true, lin_neg: true}};
 function altura() {{ return window.innerHeight - document.getElementById('barra').offsetHeight; }}
 var CORTE = {{eixo: '', frac: 0.5, inv: false}}, CAPD = {{}};
 function b64u8(s) {{ var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }}
@@ -380,16 +401,24 @@ function aplicarCorte(c) {{
     Plotly.restyle(gd, {{x: [m.x], y: [m.y], z: [m.z], i: [m.i], j: [m.j], k: [m.k], visible: true}}, [caps[u]]);
   }});
 }}
+var CORES = {{}};
+function coresTerreno(c, tipo) {{
+  var key = c + tipo;
+  if (!CORES[key]) {{ var u = b64u8(INFOS[c].cores[tipo]), a = []; for (var i = 0; i < u.length; i += 3) a.push([u[i], u[i + 1], u[i + 2]]); CORES[key] = a; }}
+  return CORES[key];
+}}
 function aplicar(c) {{
   var gd = document.getElementById('plot-' + c), fig = FIGS[c];
   var vis = fig.data.map(function(t) {{
     var m = t.meta;
-    if (m && m.indexOf('tex_') === 0) return m === textura;
+    if (m === 'geo') return textura === 'tex_geologia';
     if (m && m.indexOf('cap_') === 0) return false;
     if (m && camadasOn.hasOwnProperty(m)) return camadasOn[m];
     return true;
   }});
   Plotly.restyle(gd, {{visible: vis}});
+  var it = fig.data.findIndex(function(t) {{ return t.meta === 'terreno'; }});
+  Plotly.restyle(gd, {{vertexcolor: [coresTerreno(c, textura === 'tex_satelite' ? 'sat' : 'hip')]}}, [it]);
   var s = fig.layout.scene, ar = s.aspectratio;
   Plotly.relayout(gd, {{'scene.aspectratio': {{x: ar.x, y: ar.y, z: ar.z * EXAG / 3}}}});
   aplicarCorte(c);
