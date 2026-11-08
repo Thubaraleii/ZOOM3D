@@ -329,6 +329,7 @@ def main():
  <div class="grupo"><label>Estruturas</label><button class="cam ativo" data-m="est_falha">Falha CPRM</button><button class="cam ativo" data-m="est_fratura">Fratura CPRM</button><button class="cam ativo" data-m="est_campo">Falha de campo</button><button class="cam ativo" data-m="lin_pos">Lineam. (+)</button><button class="cam ativo" data-m="lin_neg">Lineam. (−)</button></div>
  <div class="grupo"><label>Corte</label><select id="ceixo"><option value="">Sem corte</option><option value="x">Leste–Oeste (X)</option><option value="y">Norte–Sul (Y)</option></select>
   <input type="range" id="cpos" min="5" max="95" value="50" style="width:130px"><button id="cinv">Inverter lado</button></div>
+ <div class="grupo"><a href="regional_furos_3d.html"><button type="button">Recorte regional (furos) ↗</button></a></div>
  <div id="info"></div></div>
 {"".join(f'<div class="plot{" ativo" if i == 0 else ""}" id="plot-{c}"></div>' for i, c in enumerate(ZOOMS))}
 <script>{get_plotlyjs()}</script>
