@@ -14,6 +14,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.offline import get_plotlyjs
 from rasterio import features
@@ -98,7 +99,7 @@ def mesh_xyz(m, **kw):
                 i=faces[:, 0], j=faces[:, 1], k=faces[:, 2], **kw)
 
 
-def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, pocos, est_cprm, est_campo):
+def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, pocos, est_cprm, est_campo, geoq):
     bbox = cfg["bbox"]
     x0, y0, x1, y1 = bbox
     gx, gy, gz = grade_relevo(xyz, bbox, N_GRADE)
@@ -226,13 +227,8 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
     if est_campo is not None:
         ec = est_campo[est_campo.geometry.within(janela)]
         if len(ec):
-            fig.add_trace(go.Scatter3d(
-                x=ec.geometry.x, y=ec.geometry.y, z=[elevacao(x, y) + ELEV_PONTO for x, y in zip(ec.geometry.x, ec.geometry.y)],
-                mode="markers", marker=dict(size=4, symbol="x", color="#000000", line=dict(color="#FFFFFF", width=1)),
-                text=[f"<b>{r.ponto_id}</b><br>{r.classificacao}" for r in ec.itertuples()], hoverinfo="text",
-                name="Falha de campo", legendgroup="estr", meta="est_campo"))
             # linha de superficie (rumo) de cada falha de campo: segmento de 500 m ao longo do azimute/strike
-            lx, ly, lz = [], [], []
+            lx, ly, lz, lt = [], [], [], []
             for r in ec.itertuples():
                 if r.azimute_ou_strike_deg != r.azimute_ou_strike_deg:
                     continue
@@ -240,9 +236,18 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
                 for f in np.linspace(-250, 250, 12):
                     px, py = r.geometry.x + f * ux, r.geometry.y + f * uy
                     lx.append(px); ly.append(py); lz.append(elevacao(px, py) + ELEV_LINEAMENTO)
-                lx.append(None); ly.append(None); lz.append(None)
-            fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=3),
-                                       name="Falha de campo (rumo)", legendgroup="estr", meta="est_campo", hoverinfo="name"))
+                    lt.append(f"<b>{r.ponto_id}</b><br>{r.classificacao}<br>Azimute: {r.azimute_ou_strike_deg:.0f}°")
+                lx.append(None); ly.append(None); lz.append(None); lt.append(None)
+            fig.add_trace(go.Scatter3d(x=lx, y=ly, z=lz, mode="lines", line=dict(color="#000000", width=5),
+                                       text=lt, name="Falha de campo", legendgroup="estr", meta="est_campo", hoverinfo="text"))
+    gq = geoq[geoq.geometry.within(janela)]
+    if len(gq):
+        fig.add_trace(go.Scatter3d(
+            x=gq.geometry.x, y=gq.geometry.y, z=[elevacao(x, y) + ELEV_PONTO + 8 for x, y in zip(gq.geometry.x, gq.geometry.y)], mode="markers",
+            marker=dict(size=6, symbol="diamond", color=[v.COR_TI_ALTO if c == "Alto-Ti" else v.COR_TI_BAIXO for c in gq["classificacao_ti"]],
+                        line=dict(width=1, color="#F1F5F9")),
+            text=[f"<b>{r.amostra}</b> ({r.classificacao_ti})<br>{r.origem}<br>TiO₂ {r.TiO2:.2f}% · SiO₂ {r.SiO2:.1f}%" for r in gq.itertuples()],
+            hoverinfo="text", name="Geoquímica (Alto/Baixo-Ti)", meta="geoq"))
     pd_ = pocos[pocos.geometry.within(janela)]
     if len(pd_):
         fig.add_trace(go.Scatter3d(
@@ -273,7 +278,7 @@ def montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, 
     )
     cores = dict(hip=_b64.b64encode(cor_hip.astype(np.uint8).tobytes()).decode(), sat=_b64.b64encode(cor_sat.astype(np.uint8).tobytes()).decode())
     info = dict(nome=cfg["nome"], dx=dx, dy=dy, dz=zmax - zmin, area_km2=dx * dy / 1e6,
-                n_pontos=int(len(dentro)), n_pocos=int(len(pd_)), cap=cap, cores=cores)
+                n_pontos=int(len(dentro)), n_pocos=int(len(pd_)), n_geoq=int(len(gq)), cap=cap, cores=cores)
     return fig.to_json(), info
 
 
@@ -292,10 +297,19 @@ def main():
     if ESTRUTURAL_GPKG.exists():
         est_campo = gpd.read_file(ESTRUTURAL_GPKG).to_crs(31982)
         est_campo = est_campo[est_campo["classificacao"].isin(["falha_ou_dique_ambiguo_relevo_negativo", "fratura_falha"])]
+    geoq = gpd.GeoDataFrame(columns=["geometry"], geometry="geometry", crs=31982)
+    if v.GEOQUIMICA_CSV.exists():
+        dg = pd.read_csv(v.GEOQUIMICA_CSV)
+        coord = {r.ponto_id: (r.geometry.x, r.geometry.y) for r in pontos.itertuples()}
+        for i_, r in dg.iterrows():
+            if pd.isna(r["utm_e"]) and pd.notna(r["ponto_id"]) and r["ponto_id"] in coord:
+                dg.loc[i_, "utm_e"], dg.loc[i_, "utm_n"] = coord[r["ponto_id"]]
+        dg = dg.dropna(subset=["utm_e", "utm_n"])
+        geoq = gpd.GeoDataFrame(dg, geometry=gpd.points_from_xy(dg["utm_e"], dg["utm_n"]), crs=31982)
     figs, infos = {}, {}
     for chave, cfg in ZOOMS.items():
         print(f"  zoom {chave}: {cfg['nome']}")
-        figs[chave], infos[chave] = montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, pocos, est_cprm, est_campo)
+        figs[chave], infos[chave] = montar_zoom(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos, pocos, est_cprm, est_campo, geoq)
         print(f"    {infos[chave]['area_km2']:.1f} km², {infos[chave]['n_pontos']} pontos de campo, {infos[chave]['n_pocos']} poços")
 
     import base64
@@ -325,7 +339,7 @@ def main():
  <div class="grupo"><label>Recorte</label>{abas}</div>
  <div class="grupo"><label>Textura</label><button class="tex ativo" data-t="tex_geologia">Geologia</button><button class="tex" data-t="tex_satelite">Satélite</button><button class="tex" data-t="tex_hipsometria">Hipsometria</button></div>
  <div class="grupo"><label>Exagero vertical</label><select id="exag"><option value="1">1×</option><option value="2">2×</option><option value="3" selected>3×</option><option value="5">5×</option><option value="8">8×</option></select></div>
- <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="campo">Pontos de campo</button><button class="cam ativo" data-m="pocos">Poços</button></div>
+ <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="campo">Pontos de campo</button><button class="cam ativo" data-m="geoq">Geoquímica (Alto/Baixo-Ti)</button><button class="cam ativo" data-m="pocos">Poços</button></div>
  <div class="grupo"><label>Estruturas</label><button class="cam ativo" data-m="est_falha">Falha CPRM</button><button class="cam ativo" data-m="est_fratura">Fratura CPRM</button><button class="cam ativo" data-m="est_campo">Falha de campo</button><button class="cam ativo" data-m="lin_pos">Lineam. (+)</button><button class="cam ativo" data-m="lin_neg">Lineam. (−)</button></div>
  <div class="grupo"><label>Corte</label><select id="ceixo"><option value="">Sem corte</option><option value="x">Leste–Oeste (X)</option><option value="y">Norte–Sul (Y)</option></select>
   <input type="range" id="cpos" min="5" max="95" value="50" style="width:130px"><button id="cinv">Inverter lado</button></div>
@@ -336,7 +350,7 @@ def main():
 <script>
 var FIGS = {{{",".join(f'"{c}": {figs[c]}' for c in ZOOMS)}}};
 var INFOS = {json.dumps(infos, ensure_ascii=False)};
-var criados = {{}}, atual = 'A', textura = 'tex_geologia', EXAG = 3, camadasOn = {{campo: true, pocos: true, est_falha: true, est_fratura: true, est_campo: true, lin_pos: true, lin_neg: true}};
+var criados = {{}}, atual = 'A', textura = 'tex_geologia', EXAG = 3, camadasOn = {{campo: true, geoq: true, pocos: true, est_falha: true, est_fratura: true, est_campo: true, lin_pos: true, lin_neg: true}};
 function altura() {{ return window.innerHeight - document.getElementById('barra').offsetHeight; }}
 var CORTE = {{eixo: '', frac: 0.5, inv: false}}, CAPD = {{}};
 function b64u8(s) {{ var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }}
@@ -510,7 +524,7 @@ function mostrar(c) {{
   }} else {{ Plotly.Plots.resize(gd); }}
   aplicar(c);
   var i = INFOS[c];
-  document.getElementById('info').textContent = i.nome + ' · ' + i.area_km2.toFixed(1) + ' km² · ' + i.n_pontos + ' pontos de campo · ' + i.n_pocos + ' poços';
+  document.getElementById('info').textContent = i.nome + ' · ' + i.area_km2.toFixed(1) + ' km² · ' + i.n_pontos + ' pontos de campo · ' + i.n_geoq + ' amostras de geoquímica · ' + i.n_pocos + ' poços';
 }}
 document.querySelectorAll('.aba').forEach(function(b) {{ b.onclick = function() {{ mostrar(b.dataset.z); }}; }});
 document.querySelectorAll('.tex').forEach(function(b) {{ b.onclick = function() {{
