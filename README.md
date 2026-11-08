@@ -4,7 +4,7 @@
 
 🔗 **Acesso:** <https://thubaraleii.github.io/ZOOM3D/zooms_3d_taio.html>
 
-Quatro modelos 3D de detalhe (Plotly, HTML autônomo) do sistema intrusivo de Taió, cada um como **bloco sólido** com relevo,
+Cinco modelos 3D de detalhe (Plotly, HTML autônomo) do sistema intrusivo de Taió, cada um como **bloco sólido** com relevo,
 empilhamento sedimentar, soleiras e diques em volume, e ferramenta de corte.
 
 Inclui também a página **Recorte regional (furos)** — ver abaixo.
@@ -17,6 +17,7 @@ Inclui também a página **Recorte regional (furos)** — ver abaixo.
 | B | Pechincha |
 | C | Domínio norte |
 | D | Domínio sul |
+| E | Horst (esquemático) |
 
 Os retângulos (UTM 22S, SIRGAS 2000) estão no dicionário `ZOOMS` de `gerar_zooms_3d.py`.
 
@@ -26,6 +27,17 @@ Os retângulos (UTM 22S, SIRGAS 2000) estão no dicionário `ZOOMS` de `gerar_zo
 - **Corte** em X (Leste–Oeste) ou Y (Norte–Sul), com controle deslizante e **Inverter lado**. O corte recorta a malha por um plano e calcula a **face do corte** no navegador (empilhamento, soleira e dique); a caixa e a escala permanecem fixas.
 - **Camadas:** pontos de campo, geoquímica (Alto/Baixo-Ti), poços, e estruturas — falha CPRM, fratura CPRM, falha de campo (traço de rumo) e lineamentos positivo/negativo, cada um com seu botão.
 - **Exagero vertical** de 1× a 8× (padrão 3×).
+
+## Aba E — Horst (modelo esquemático)
+
+Bloco de todo o domínio de Taió (≈ 23 × 35 km) com o **horst** definido em `horst.shp` (linha “Alto”: três falhas que o limitam; linhas “baixo”: extremidades) e **grabens subordinados** nos dois flancos.
+
+- **Zonas rígidas:** horst, grabens (faixa de 3 km a cada lado do horst) e restante do bloco; relevo, decalques geológicos, soleiras, diques, paredes e camadas vetoriais são recortados por zona, de modo que as falhas são degraus verticais exatos.
+- **Basculamento:** o rejeito do horst varia linearmente de ~8 % do máximo na borda norte (linha “baixo”) a 100 % na quina sul; os grabens afundam até 35 % do rejeito do horst, com suavização perto da extremidade sul.
+- **Controles:** controle deslizante de **rejeito** (0–300 m) e botão **Subir / descer** (única animação); camadas **Planos de falha** (fitas verticais do topo à base), **Traços** (falhas do horst, limites “baixo” e falhas subordinadas) e **Rótulos**.
+- **Corte** X/Y com face de corte que acompanha os degraus nas falhas; laje cinza “Base (não modelada)” de 300 m abaixo do pacote sedimentar, só para que as falhas desçam além do modelo estratigráfico.
+- **Parâmetros** (`gerar_zooms_3d.py`): `LARGURA_GRABEN`, `T_MAX_HORST`, `A_HORST`, `G_GRABEN`, `EXTRA_BASE`.
+- O rejeito é **ilustrativo**: com rejeito 0 o bloco é o modelo calibrado nos dados; valores maiores são uma representação esquemática, não uma medida.
 
 ## Dados e métodos
 
@@ -53,6 +65,7 @@ O repositório contém o HTML publicado e o script gerador. Para regenerar é ne
 
 ```bash
 python gerar_zooms_3d.py  # e gerar_regional_furos.py
+# a aba E também lê 2_Banco_de_Dados/dados_base/horst.shp
 ```
 
 Dependências Python: `numpy`, `pandas`, `geopandas`, `shapely`, `pyproj`, `rasterio`, `scipy`, `plotly`, `contextily`.
