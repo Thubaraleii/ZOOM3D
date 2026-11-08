@@ -378,12 +378,12 @@ def paredes_zonadas(bbox, Z, fn_topo, fn_base, passo=120.0):
     return (np.concatenate(X), np.concatenate(Y), np.concatenate(Zz), np.concatenate(I), np.concatenate(J), np.concatenate(K), np.concatenate(ZN))
 
 
-def fita_vertical(linha, fn_topo, fn_base, passo=100.0):
+def fita_vertical(linha, fn_topo, fn_base, passo=100.0, extra=6.0):
     """Plano de falha vertical (fita) ao longo de uma linha, do topo drapeado ate a base."""
     n = max(int(linha.length // passo), 2)
     pts = [linha.interpolate(d) for d in np.linspace(0, linha.length, n + 1)]
     xs, ys = np.array([q.x for q in pts]), np.array([q.y for q in pts])
-    X, Y, Zz = np.concatenate([xs, xs]), np.concatenate([ys, ys]), np.concatenate([fn_topo(xs, ys) + 6, fn_base(xs, ys)])
+    X, Y, Zz = np.concatenate([xs, xs]), np.concatenate([ys, ys]), np.concatenate([fn_topo(xs, ys) + extra, fn_base(xs, ys)])
     idx = np.arange(n)
     n1 = n + 1
     return X, Y, Zz, np.concatenate([idx, idx + 1]), np.concatenate([idx + 1, idx + n1 + 1]), np.concatenate([idx + n1, idx + n1])
@@ -488,10 +488,45 @@ def montar_horst(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos,
                       lighting=dict(ambient=0.95, diffuse=0.1, specular=0.0)))
     zmin_bloco = float(np.nanmin(contatos_orig[5])) - EXTRA_BASE
 
-    # ---------------- planos de falha (fitas verticais, do topo ate a base) ----------------
+    # ---------------- paredes de falha: face exposta do bloco mais alto, coluna completa (camadas + base) ----------------
+    def linhas_de(geom):
+        return [g_ for g_ in ([geom] if geom.geom_type == "LineString" else list(getattr(geom, "geoms", []))) if g_.geom_type == "LineString" and g_.length > 50]
+    interior = janela.buffer(-5)
+    linhas_h = linhas_de(Z["H"].exterior.intersection(interior))                                              # lado do horst (sobe)
+    linhas_r = linhas_de(Z["G"].boundary.difference(Z["H"].buffer(6)).intersection(interior))                 # lado fixo (grabens afundam)
+    fbase = lambda x, y: fcon_orig[5](x, y) - EXTRA_BASE
+    camadas_w = [(nome, cor, fcon[k], fcon[k + 1]) for k, (nome, cor) in enumerate(zip(v.NOMES_CAMADAS, v.CORES_CAMADAS))]
+    camadas_w.append(("Base (não modelada)", COR_BASE, fcon_orig[5], fbase))
+    for zcode, linhas in ((1, linhas_h), (0, linhas_r)):
+        for nome, cor, ft, fb in camadas_w:
+            XX, YY, ZZ, II, JJ, KK, off_w = [], [], [], [], [], [], 0
+            for ln in linhas:
+                rx, ry, rz, ri, rj, rk = fita_vertical(ln, ft, fb, 100.0, extra=0.0)
+                XX.append(rx); YY.append(ry); ZZ.append(rz); II.append(ri + off_w); JJ.append(rj + off_w); KK.append(rk + off_w); off_w += len(rx)
+            if not XX:
+                continue
+            XX, YY, ZZ = np.concatenate(XX), np.concatenate(YY), np.concatenate(ZZ)
+            add(go.Mesh3d(x=np.round(XX, 1), y=np.round(YY, 1), z=np.round(ZZ, 1), i=np.concatenate(II).astype(np.int32), j=np.concatenate(JJ).astype(np.int32),
+                          k=np.concatenate(KK).astype(np.int32), color=cor, flatshading=False, name=nome, legendgroup=nome, showlegend=False, hoverinfo="name",
+                          lighting=dict(ambient=0.95, diffuse=0.1, specular=0.0, roughness=1.0)), np.full(len(XX), zcode, np.uint8))
+
+    # ---------------- planos de falha (fitas verticais), deslocados 8 m para o lado de fora da parede (sem z-fighting) ----------------
+    def deslocada(linha, alvo_dentro, d=8.0):
+        for sinal in (d, -d):
+            try:
+                o = linha.offset_curve(sinal)
+            except Exception:
+                return linha
+            if o.is_empty or o.geom_type != "LineString":
+                continue
+            m = o.interpolate(0.5, normalized=True)
+            if alvo_dentro(m):
+                return o
+        return linha
+
     P = Z["P"]
     segs_alto = [LineString([P[0], P[1]]), LineString([P[1], P[2]]), LineString([P[2], P[3]])]
-    fbase = lambda x, y: fcon_orig[5](x, y) - EXTRA_BASE
+    segs_alto = [deslocada(s_, lambda m: not Z["H"].contains(m)) for s_ in segs_alto]
     for s_ in segs_alto:
         rx, ry, rz, ri, rj, rk = fita_vertical(s_, zb, fbase)
         add(go.Mesh3d(x=np.round(rx, 1), y=np.round(ry, 1), z=np.round(rz, 1), i=ri.astype(np.int32), j=rj.astype(np.int32), k=rk.astype(np.int32),
@@ -499,6 +534,7 @@ def montar_horst(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos,
                       meta="plano_falha", lighting=dict(ambient=1.0, diffuse=0.0)), np.zeros(len(rx), np.uint8))
     outer = Z["G"].boundary.difference(Z["H"].buffer(5)).difference(Z["band"].boundary.buffer(5)).intersection(janela)
     for s_ in [g for g in getattr(outer, "geoms", [outer]) if g.geom_type == "LineString" and g.length > 300]:
+        s_ = deslocada(s_, lambda m: Z["G"].contains(m))
         rx, ry, rz, ri, rj, rk = fita_vertical(s_, zb, fbase, 150.0)
         add(go.Mesh3d(x=np.round(rx, 1), y=np.round(ry, 1), z=np.round(rz, 1), i=ri.astype(np.int32), j=rj.astype(np.int32), k=rk.astype(np.int32),
                       color=COR_FALHA_GRABEN, opacity=0.25, flatshading=True, showlegend=False, hoverinfo="name", name="Falha subordinada do graben (plano)",

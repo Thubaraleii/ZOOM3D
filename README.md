@@ -35,6 +35,7 @@ Bloco de todo o domínio de Taió (≈ 23 × 35 km) com o **horst** definido em 
 - **Zonas rígidas:** horst, grabens (faixa de 3 km a cada lado do horst) e restante do bloco; relevo, decalques geológicos, soleiras, diques, paredes e camadas vetoriais são recortados por zona, de modo que as falhas são degraus verticais exatos.
 - **Basculamento:** o rejeito do horst varia linearmente de ~8 % do máximo na borda norte (linha “baixo”) a 100 % na quina sul; os grabens afundam até 35 % do rejeito do horst, com suavização perto da extremidade sul.
 - **Controles:** controle deslizante de **rejeito** (0–300 m) e botão **Subir / descer** (única animação); camadas **Planos de falha** (fitas verticais do topo à base), **Traços** (falhas do horst, limites “baixo” e falhas subordinadas) e **Rótulos**.
+- **Paredes de falha:** nas bordas do horst (e nas falhas dos grabens) o bloco mais alto exibe a coluna completa — cada unidade e a base — de modo que o degrau exposto mostra as camadas.
 - **Corte** X/Y com face de corte que acompanha os degraus nas falhas; laje cinza “Base (não modelada)” de 300 m abaixo do pacote sedimentar, só para que as falhas desçam além do modelo estratigráfico.
 - **Parâmetros** (`gerar_zooms_3d.py`): `LARGURA_GRABEN`, `T_MAX_HORST`, `A_HORST`, `G_GRABEN`, `EXTRA_BASE`.
 - O rejeito é **ilustrativo**: com rejeito 0 o bloco é o modelo calibrado nos dados; valores maiores são uma representação esquemática, não uma medida.
