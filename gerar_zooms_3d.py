@@ -382,22 +382,98 @@ function montarCaps(c, eixo, pos) {{
   }}
   return out;
 }}
-function aplicarCorte(c) {{
-  var gd = document.getElementById('plot-' + c), fig = FIGS[c], s = fig.layout.scene, d = prep(c);
-  var caps = [];
-  fig.data.forEach(function(t, n) {{ if (t.meta && t.meta.indexOf('cap_') === 0) caps[parseInt(t.meta.slice(4), 10)] = n; }});
-  var patch = {{'scene.xaxis.range': s.xaxis.range, 'scene.yaxis.range': s.yaxis.range}};
-  if (!CORTE.eixo) {{
-    Plotly.restyle(gd, {{visible: false}}, caps);
-    Plotly.relayout(gd, patch);
-    return;
+
+function dec(a) {{
+  if (a && a.bdata) {{
+    var T = {{i1: Int8Array, u1: Uint8Array, i2: Int16Array, u2: Uint16Array, i4: Int32Array, u4: Uint32Array, f4: Float32Array, f8: Float64Array}}[a.dtype];
+    var b = atob(a.bdata), u = new Uint8Array(b.length); for (var q = 0; q < b.length; q++) u[q] = b.charCodeAt(q);
+    return new T(u.buffer);
   }}
+  return a;
+}}
+// recorte de malha por plano (x=pos ou y=pos): triangulos inteiros ficam, os cortados sao refeitos no plano -- a caixa NAO muda (corpo estatico)
+function clipMesh(o, ax, pos, menor, vc) {{
+  var P = ax === 'x' ? o.x : o.y, n = o.x.length, map = new Int32Array(n).fill(-1);
+  var X = [], Y = [], Z = [], C = vc ? [] : null, I = [], J = [], K = [];
+  function dentro(v) {{ return menor ? P[v] <= pos : P[v] >= pos; }}
+  function add(v) {{ var m = map[v]; if (m < 0) {{ m = map[v] = X.length; X.push(o.x[v]); Y.push(o.y[v]); Z.push(o.z[v]); if (C) C.push(vc[v]); }} return m; }}
+  function inter(a, b) {{
+    var t = (pos - P[a]) / (P[b] - P[a]), m = X.length;
+    X.push(o.x[a] + t * (o.x[b] - o.x[a])); Y.push(o.y[a] + t * (o.y[b] - o.y[a])); Z.push(o.z[a] + t * (o.z[b] - o.z[a]));
+    if (C) C.push([vc[a][0] + t * (vc[b][0] - vc[a][0]), vc[a][1] + t * (vc[b][1] - vc[a][1]), vc[a][2] + t * (vc[b][2] - vc[a][2])]);
+    return m;
+  }}
+  for (var q = 0, nt = o.i.length; q < nt; q++) {{
+    var a = o.i[q], b = o.j[q], c = o.k[q], da = dentro(a), db = dentro(b), dc = dentro(c), s = da + db + dc;
+    if (s === 3) {{ I.push(add(a)); J.push(add(b)); K.push(add(c)); }}
+    else if (s > 0) {{
+      var vs = [a, b, c], ds = [da, db, dc], poly = [];
+      for (var e = 0; e < 3; e++) {{
+        var p = vs[e], r = vs[(e + 1) % 3];
+        if (ds[e]) poly.push(add(p));
+        if (ds[e] !== ds[(e + 1) % 3]) poly.push(inter(p, r));
+      }}
+      for (var f = 1; f + 1 < poly.length; f++) {{ I.push(poly[0]); J.push(poly[f]); K.push(poly[f + 1]); }}
+    }}
+  }}
+  if (!I.length) return {{x: [0, 0, 0], y: [0, 0, 0], z: [0, 0, 0], i: [0], j: [1], k: [2], vc: C ? [[0, 0, 0], [0, 0, 0], [0, 0, 0]] : null}};
+  return {{x: X, y: Y, z: Z, i: I, j: J, k: K, vc: C}};
+}}
+function clipScat(o, ax, pos, menor) {{
+  var P = ax === 'x' ? o.x : o.y, X = [], Y = [], Z = [];
+  for (var q = 0, n = P.length; q < n; q++) {{
+    var v = P[q], ok = v === null || (menor ? v <= pos : v >= pos);
+    X.push(ok ? o.x[q] : null); Y.push(ok ? o.y[q] : null); Z.push(ok ? o.z[q] : null);
+  }}
+  return {{x: X, y: Y, z: Z}};
+}}
+// guarda os dados originais das malhas/linhas/pontos recortaveis
+function guardarOrig(fig) {{
+  var orig = {{}}, malhas = [], cenas = [];
+  fig.data.forEach(function(t, n) {{
+    if (t.type === 'mesh3d' && !(t.meta && t.meta.indexOf('cap_') === 0)) {{
+      orig[n] = {{x: dec(t.x), y: dec(t.y), z: dec(t.z), i: dec(t.i), j: dec(t.j), k: dec(t.k)}}; malhas.push(n);
+    }} else if (t.type === 'scatter3d' && t.meta && t.meta !== 'norte') {{
+      orig[n] = {{x: dec(t.x), y: dec(t.y), z: dec(t.z)}}; cenas.push(n);
+    }}
+  }});
+  return {{orig: orig, malhas: malhas, cenas: cenas, clipado: false}};
+}}
+// aplica (ou desfaz) o recorte numa figura; corpoCor = cores atuais do relevo (nested rgb)
+function recortar(gd, est, idxTerreno, corpoCor, eixo, pos, menor) {{
+  var rest = function(upd, idx) {{ if (idx.length) Plotly.restyle(gd, upd, idx); }};
+  var corta = !!eixo;
+  var outras = est.malhas.filter(function(n) {{ return n !== idxTerreno; }});
+  var T = est.orig[idxTerreno];
+  if (!corta) {{
+    if (!est.clipado) return;
+    Plotly.restyle(gd, {{x: [T.x], y: [T.y], z: [T.z], i: [T.i], j: [T.j], k: [T.k], vertexcolor: [corpoCor]}}, [idxTerreno]);
+    var o = est.orig;
+    rest({{x: outras.map(function(n) {{ return o[n].x; }}), y: outras.map(function(n) {{ return o[n].y; }}), z: outras.map(function(n) {{ return o[n].z; }}),
+          i: outras.map(function(n) {{ return o[n].i; }}), j: outras.map(function(n) {{ return o[n].j; }}), k: outras.map(function(n) {{ return o[n].k; }})}}, outras);
+    rest({{x: est.cenas.map(function(n) {{ return o[n].x; }}), y: est.cenas.map(function(n) {{ return o[n].y; }}), z: est.cenas.map(function(n) {{ return o[n].z; }})}}, est.cenas);
+    est.clipado = false; return;
+  }}
+  var rt = clipMesh(T, eixo, pos, menor, corpoCor);
+  Plotly.restyle(gd, {{x: [rt.x], y: [rt.y], z: [rt.z], i: [rt.i], j: [rt.j], k: [rt.k], vertexcolor: [rt.vc]}}, [idxTerreno]);
+  var cm = outras.map(function(n) {{ return clipMesh(est.orig[n], eixo, pos, menor, null); }});
+  rest({{x: cm.map(function(r) {{ return r.x; }}), y: cm.map(function(r) {{ return r.y; }}), z: cm.map(function(r) {{ return r.z; }}),
+        i: cm.map(function(r) {{ return r.i; }}), j: cm.map(function(r) {{ return r.j; }}), k: cm.map(function(r) {{ return r.k; }})}}, outras);
+  var cs = est.cenas.map(function(n) {{ return clipScat(est.orig[n], eixo, pos, menor); }});
+  rest({{x: cs.map(function(r) {{ return r.x; }}), y: cs.map(function(r) {{ return r.y; }}), z: cs.map(function(r) {{ return r.z; }})}}, est.cenas);
+  est.clipado = true;
+}}
+var ESTZ = {{}};
+function aplicarCorte(c) {{
+  var gd = document.getElementById('plot-' + c), fig = FIGS[c], d = prep(c);
+  if (!ESTZ[c]) ESTZ[c] = guardarOrig(fig);
+  var caps = []; fig.data.forEach(function(t, n) {{ if (t.meta && t.meta.indexOf('cap_') === 0) caps[parseInt(t.meta.slice(4), 10)] = n; }});
+  var it = fig.data.findIndex(function(t) {{ return t.meta === 'terreno'; }});
+  var corpoCor = coresTerreno(c, textura === 'tex_satelite' ? 'sat' : 'hip');
+  if (!CORTE.eixo) {{ recortar(gd, ESTZ[c], it, corpoCor, '', 0, true); Plotly.restyle(gd, {{visible: false}}, caps); return; }}
   var eixo = CORTE.eixo, a0 = eixo === 'x' ? d.x0 : d.y0, a1 = eixo === 'x' ? d.x1 : d.y1, pos = a0 + CORTE.frac * (a1 - a0);
-  var base = (eixo === 'x' ? s.xaxis.range : s.yaxis.range);
-  patch['scene.' + eixo + 'axis.range'] = CORTE.inv ? [pos - 0.5, base[1]] : [base[0], pos + 0.5];
-  Plotly.relayout(gd, patch);
-  var dados = montarCaps(c, eixo, pos);
-  dados.forEach(function(m, u) {{
+  recortar(gd, ESTZ[c], it, corpoCor, eixo, pos, !CORTE.inv);
+  montarCaps(c, eixo, pos).forEach(function(m, u) {{
     Plotly.restyle(gd, {{x: [m.x], y: [m.y], z: [m.z], i: [m.i], j: [m.j], k: [m.k], visible: true}}, [caps[u]]);
   }});
 }}
@@ -418,7 +494,7 @@ function aplicar(c) {{
   }});
   Plotly.restyle(gd, {{visible: vis}});
   var it = fig.data.findIndex(function(t) {{ return t.meta === 'terreno'; }});
-  Plotly.restyle(gd, {{vertexcolor: [coresTerreno(c, textura === 'tex_satelite' ? 'sat' : 'hip')]}}, [it]);
+  if (!(ESTZ[c] && ESTZ[c].clipado)) Plotly.restyle(gd, {{vertexcolor: [coresTerreno(c, textura === 'tex_satelite' ? 'sat' : 'hip')]}}, [it]);
   var s = fig.layout.scene, ar = s.aspectratio;
   Plotly.relayout(gd, {{'scene.aspectratio': {{x: ar.x, y: ar.y, z: ar.z * EXAG / 3}}}});
   aplicarCorte(c);
