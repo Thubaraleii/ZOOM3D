@@ -55,6 +55,12 @@ Bloco regional que cobre o raio dos **10 poços ANP mais próximos de Taió** e 
 - **Superfícies das unidades** indicativas, obtidas por extrapolação do modelo regional de Taió. A tabela de poços da ANP **não contém topos de formação nem litologia**, portanto as superfícies não são amarradas aos poços.
 - Para calibrar, preencher `topos_pocos.csv` (`poco, formacao, prof_topo_m`) e regenerar: o script ajusta as superfícies aos topos (tendência + resíduo interpolado).
 
+## Idioma e navegação
+
+- **Idioma:** o botão **EN / PT**, ao lado do logotipo, alterna a interface entre português e inglês em tempo real (menus, legendas, dicas, popups, rótulos e textos 3D). A escolha é lembrada no navegador e acompanha os links entre as páginas (`?lang=en`).
+- **Hub:** o botão **← Hub** volta à página inicial do projeto, mantendo o idioma.
+- **Tradução:** feita no navegador por dicionário (`tps_i18n_dict.py`, embutido na página por `tps_i18n.py` ao gerar o HTML). Dados de origem em português (por exemplo, descrições de campo e nomes próprios de unidades) permanecem no idioma original.
+
 ## Uso
 
 Abra `zooms_3d_taio.html` (e `regional_furos_3d.html`) no navegador ou acesse as versões publicadas. Arraste para orbitar e role para ampliar.

@@ -295,6 +295,9 @@ TAB.forEach(function(r) {{ var tr = document.createElement('tr'); tr.innerHTML =
 window.addEventListener('resize', function() {{ dimensionar(); Plotly.Plots.resize(gd); }});
 </script></body></html>"""
     OUT_HTML.write_text(html, encoding="utf-8")
+    sys.path.insert(0, str(Path(__file__).parent)) if 'sys' in globals() else __import__('sys').path.insert(0, str(Path(__file__).parent))
+    import tps_i18n  # botao de idioma (PT/EN) e volta ao hub
+    tps_i18n.injetar(OUT_HTML, css="#barra{padding-right:200px}")
     print(f"Salvo em: {OUT_HTML} ({OUT_HTML.stat().st_size / 1e6:.1f} MB)")
 
 
