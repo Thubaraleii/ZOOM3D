@@ -563,18 +563,7 @@ def montar_horst(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos,
     for idx in range(i0, len(fig.data)):
         tr = fig.data[idx]
         xs_ = np.array([np.nan if q is None else q for q in tr.x], float); ys_ = np.array([np.nan if q is None else q for q in tr.y], float)
-        zn = classificar(Z, xs_, ys_)
-        if tr.mode == "lines" and len(xs_) > 1:
-            # linhas que cruzam uma falha do horst sao quebradas na fronteira (cada lado se desloca de forma independente)
-            tx = list(tr.text) if tr.text is not None and not isinstance(tr.text, str) else None
-            X, Y, Zv, TX, ZN2 = [], [], [], [], []
-            for k in range(len(xs_)):
-                if k > 0 and np.isfinite(xs_[k]) and np.isfinite(xs_[k - 1]) and zn[k] != zn[k - 1]:
-                    X.append(None); Y.append(None); Zv.append(None); TX.append(None); ZN2.append(0)
-                X.append(tr.x[k]); Y.append(tr.y[k]); Zv.append(tr.z[k]); TX.append(tx[k] if tx is not None else None); ZN2.append(zn[k])
-            tr.update(x=X, y=Y, z=Zv, **({"text": TX} if tx is not None else {}))
-            zn = np.array(ZN2, np.uint8)
-        zon[idx] = zn
+        zon[idx] = classificar(Z, xs_, ys_)
 
     # ---------------- tracos das falhas do horst, extremidades ("baixo") e rotulos ----------------
     def linha_drapeada(geom, z_extra=14.0, passo=60.0):
@@ -599,7 +588,7 @@ def montar_horst(chave, cfg, xyz, elevacao, lito, sat, sat_bbox, lineas, pontos,
     outer_l = Z["G"].boundary.difference(Z["H"].buffer(5)).difference(Z["band"].boundary.buffer(5))
     xs, ys, zs = linha_drapeada(outer_l, 14.0, 80.0)
     add(go.Scatter3d(x=xs, y=ys, z=zs, mode="lines", line=dict(color=COR_FALHA_GRABEN, width=5, dash="dot"), name="Falhas subordinadas (grabens)", legendgroup="horst",
-                     meta="linhas_horst", hoverinfo="name"), [0] * len(xs))  # lado fixo (o mais alto), como a parede de falha
+                     meta="linhas_horst", hoverinfo="name"), classificar(Z, [q if q is not None else np.nan for q in xs], [q if q is not None else np.nan for q in ys]))
     rot_x, rot_y, rot_t, rot_z = [], [], [], []
     ph = Z["H"].representative_point(); rot_x.append(ph.x); rot_y.append(ph.y); rot_t.append("HORST"); rot_z.append(1)
     for g in partes_poligono(Z["G"]):
