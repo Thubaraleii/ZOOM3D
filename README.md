@@ -53,7 +53,7 @@ Bloco regional que cobre o raio dos **10 poços ANP mais próximos de Taió** e 
 - Relevo (AWS Terrain Tiles) em hipsometria ou geologia SC (CPRM); falhas, fraturas, diques e lineamentos; área de estudo e círculo do raio dos poços.
 - Poços como hastes da boca ao fundo (profundidade total) e tabela lateral com distância, profundidade e cota do fundo.
 - **Superfícies das unidades** indicativas, obtidas por extrapolação do modelo regional de Taió. A tabela de poços da ANP **não contém topos de formação nem litologia**, portanto as superfícies não são amarradas aos poços.
-- Para calibrar, preencher `topos_pocos.csv` (`poco, formacao, prof_topo_m`) e regenerar: o script ajusta as superfícies aos topos (tendência + resíduo interpolado).
+- **Calibração:** as superfícies são ajustadas aos topos de `2_Banco_de_Dados/dados_base/topos_pocos.csv` (`poco, formacao, prof_topo_m`; formações Irati, Palermo e Rio Bonito, e a linha `Rio Bonito (base)` para a base do modelo) como tendência regional + resíduo interpolado. Teresina e Serra Alta não têm topo separado na fonte e não são calibradas. Interfaces são forçadas a manter a ordem estratigráfica (sem espessura negativa). Longe dos poços as superfícies são extrapoladas e devem ser lidas como indicativas.
 
 ## Idioma e navegação
 

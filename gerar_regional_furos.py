@@ -133,17 +133,27 @@ def main():
     if TOPOS_CSV.exists():
         tp = pd.read_csv(TOPOS_CSV)
         pt_xy = {r.nome: (r.geometry.x, r.geometry.y) for r in sel.itertuples()}
-        for k, nome in enumerate(v.NOMES_CAMADAS):
-            sub = tp[(tp["formacao"] == nome) & tp["prof_topo_m"].notna() & tp["poco"].isin(pt_xy)]
+
+        def calibrar(k, formacao):
+            # superficie de ordem k (topo da unidade k = base da anterior) ajustada aos topos medidos nos pocos
+            sub = tp[(tp["formacao"] == formacao) & tp["prof_topo_m"].notna() & tp["poco"].isin(pt_xy)]
             if len(sub) < 3:
-                continue
+                return False
             px = np.array([pt_xy[p][0] for p in sub["poco"]]); py = np.array([pt_xy[p][1] for p in sub["poco"]])
             ztop = z_em(px, py) - sub["prof_topo_m"].values
             ttilt = v.Z_REF_TILT + v.TREND_A * (px - v.TREND_X0) + v.TREND_B * (py - v.TREND_Y0) - prof[k]
             resid = griddata((px, py), ztop - ttilt, (gx, gy), method="linear")
             resid = np.where(np.isnan(resid), griddata((px, py), ztop - ttilt, (gx, gy), method="nearest"), resid)
             contatos[k] = np.minimum(tilt - prof[k] + resid, gz)
-            calibrado = True
+            return True
+
+        for k, nome in enumerate(v.NOMES_CAMADAS):
+            calibrado |= calibrar(k, nome)
+        # base do modelo = base do Rio Bonito (ficha da planilha); sem ela a base fica invertida sob os topos calibrados
+        calibrado |= calibrar(len(prof) - 1, "Rio Bonito (base)")
+        # ordem estratigrafica: nenhuma superficie pode ficar acima da anterior (evita camadas com espessura negativa)
+        for k in range(1, len(contatos)):
+            contatos[k] = np.minimum(contatos[k], contatos[k - 1])
     for m, nome in enumerate(v.NOMES_CAMADAS):
         z = np.where(contatos[m + 1] < gz - 8, contatos[m + 1], np.nan)
         fig.add_trace(go.Surface(x=gx, y=gy, z=z, colorscale=[[0, COR_UNIDADE[nome]], [1, COR_UNIDADE[nome]]], showscale=False, opacity=0.55,
@@ -267,7 +277,7 @@ def main():
  <div id="aviso">{aviso}</div></div>
 <div id="corpo"><div id="plot"></div>
 <aside id="lateral"><h2>Poços no recorte</h2><table id="tab"><tr><th>Poço</th><th>km</th><th>TD (m)</th><th>Fundo (cota)</th></tr></table>
- <p style="opacity:.7;line-height:1.5">Cota do fundo = relevo (Terrain Tiles) na boca − profundidade total. A tabela ANP não informa topos de formação nem litologia, por isso o embasamento e as unidades não são amarrados aos poços aqui. Para calibrar, preencha <code>dados_base/topos_pocos.csv</code> (poco, formacao, prof_topo_m) e regenere.</p></aside></div>
+ <p style="opacity:.7;line-height:1.5">Cota do fundo = relevo (Terrain Tiles) na boca − profundidade total. Unidades calibradas nos topos da planilha PMP/ANP (Irati, Palermo, Rio Bonito e base do Rio Bonito) para os poços do recorte que a planilha cobre; Teresina e Serra Alta não têm topo separado na fonte e seguem a tendência regional. Longe dos poços as superfícies são extrapoladas.</p></aside></div>
 <script>{get_plotlyjs()}</script>
 <script>
 var FIG = {fig.to_json()}, AR = {{x: {ar.x}, y: {ar.y}, z: {ar.z}}}, CORES = {json.dumps(cores)}, TAB = {json.dumps(tabela, ensure_ascii=False)};
