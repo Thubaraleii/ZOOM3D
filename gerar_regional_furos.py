@@ -248,8 +248,14 @@ def main():
         sx, sy, sz, tx, ty, tz, tt = plan
         fig.add_trace(go.Scatter3d(x=sx, y=sy, z=sz, mode="lines", line=dict(color="#FF493D", width=9), name="Soleiras (poços PMP/ANP)",
                                    meta="pocos", hoverinfo="skip"))
-        fig.add_trace(go.Scatter3d(x=tx, y=ty, z=tz, mode="markers", marker=dict(size=4, symbol="diamond", color="#F1F5F9"), text=tt,
-                                   hoverinfo="text", name="Topos de unidade (poços PMP/ANP)", meta="pocos"))
+        # marcador grande + haste curta: a superficie (semitransparente) escondia o marcador colado na cota do topo
+        hx_, hy_, hz_ = [], [], []
+        for x_, y_, z_ in zip(tx, ty, tz):
+            hx_ += [x_, x_, None]; hy_ += [y_, y_, None]; hz_ += [z_ - 60, z_ + 60, None]
+        fig.add_trace(go.Scatter3d(x=hx_, y=hy_, z=hz_, mode="lines", line=dict(color="#FFFFFF", width=4), hoverinfo="skip",
+                                   name="Topos de unidade (poços PMP/ANP)", legendgroup="topos", showlegend=False, meta="pocos"))
+        fig.add_trace(go.Scatter3d(x=tx, y=ty, z=tz, mode="markers", marker=dict(size=9, symbol="diamond", color="#FFFFFF", line=dict(width=1.5, color="#071729")),
+                                   text=tt, hoverinfo="text", name="Topos de unidade (poços PMP/ANP)", legendgroup="topos", meta="pocos"))
     # ---- pocos: haste da boca (relevo) ate o fundo (profundidade total) ----
     zbocas = z_em(sel.geometry.x.values, sel.geometry.y.values)
     fundos = zbocas - sel["profundidade_m"].fillna(0).values
